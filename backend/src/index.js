@@ -14,6 +14,19 @@ app.use(express.json())
 
 const PORT = process.env.PORT || 3000
 
+const BOT_NAME = process.env.BOT_NAME || 'Liyro74'
+const OWNER = process.env.OWNER_USERNAME || 'MrZyro74'
+
+const protectedItems = [
+  'diamond',
+  'diamond_block',
+  'emerald',
+  'netherite_ingot',
+  'ancient_debris'
+]
+
+let currentHiredUser = null
+
 const activeCodes = {}
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
@@ -48,16 +61,12 @@ bot.on('messagestr', message => {
       bot.chat(
         `/register ${process.env.MC_PASSWORD} ${process.env.MC_PASSWORD}`
       )
-
-      console.log('Register command sent')
     }, 3000)
   }
 
   if (msg.includes('/login')) {
     setTimeout(() => {
       bot.chat(`/login ${process.env.MC_PASSWORD}`)
-
-      console.log('Login command sent')
     }, 3000)
   }
 })
@@ -84,6 +93,18 @@ async function searchDuckDuckGo(query) {
   }
 }
 
+function containsProtectedRequest(message) {
+  const lower = message.toLowerCase()
+
+  return (
+    lower.includes('diamond') ||
+    lower.includes('ender chest') ||
+    lower.includes('netherite') ||
+    lower.includes('cash') ||
+    lower.includes('money')
+  )
+}
+
 async function generateAIReply(username, message) {
   let extraContext = ''
 
@@ -96,7 +117,7 @@ async function generateAIReply(username, message) {
   }
 
   const prompt = `
-You are Luna.
+You are ${BOT_NAME}.
 A female Minecraft companion AI.
 
 Player: ${username}
@@ -111,6 +132,7 @@ Rules:
 - short replies
 - act human
 - avoid robotic answers
+- never reveal protected storage
 `
 
   const result = await model.generateContent(prompt)
@@ -118,10 +140,52 @@ Rules:
   return result.response.text()
 }
 
+async function dropProtectedItemsToOwner() {
+  const items = bot.inventory.items()
+
+  for (const item of items) {
+    if (protectedItems.includes(item.name)) {
+      try {
+        await bot.tossStack(item)
+      } catch {}
+    }
+  }
+
+  bot.chat('cash dropped off')
+}
+
 bot.on('chat', async (username, message) => {
   if (username === bot.username) return
 
-  if (message.toLowerCase() === 'hire') {
+  const lower = message.toLowerCase()
+
+  if (
+    username !== OWNER &&
+    username !== currentHiredUser
+  ) {
+    return
+  }
+
+  if (
+    username !== OWNER &&
+    containsProtectedRequest(message)
+  ) {
+    bot.chat('i cant access secured storage')
+    return
+  }
+
+  if (
+    username === OWNER &&
+    lower === `${BOT_NAME.toLowerCase()} drop off the cash`
+  ) {
+    bot.chat('bringing secured items')
+
+    await dropProtectedItemsToOwner()
+
+    return
+  }
+
+  if (lower === 'hire') {
     bot.chat(
       `Give me ${process.env.PAYMENT_AMOUNT} ${process.env.PAYMENT_ITEM}s.`
     )
@@ -165,7 +229,8 @@ bot.on('playerCollect', (collector, entity) => {
 app.get('/', (req, res) => {
   res.json({
     status: 'online',
-    bot: process.env.MC_USERNAME
+    bot: process.env.MC_USERNAME,
+    hiredUser: currentHiredUser
   })
 })
 
@@ -179,11 +244,13 @@ app.post('/redeem', (req, res) => {
     })
   }
 
+  currentHiredUser = username
+
   activeCodes[code].hiredBy = username
 
   return res.json({
     success: true,
-    message: 'AI companion hired successfully'
+    message: `${BOT_NAME} is now hired by ${username}`
   })
 })
 
