@@ -31,6 +31,43 @@ const bot = mineflayer.createBot({
 
 bot.once('spawn', () => {
   console.log('AI Companion Online')
+
+  setTimeout(() => {
+    bot.chat('/connect survival')
+    console.log('Connecting to survival')
+  }, 8000)
+})
+
+bot.on('messagestr', message => {
+  const msg = message.toLowerCase()
+
+  console.log('[SERVER]', message)
+
+  if (msg.includes('/register')) {
+    setTimeout(() => {
+      bot.chat(
+        `/register ${process.env.MC_PASSWORD} ${process.env.MC_PASSWORD}`
+      )
+
+      console.log('Register command sent')
+    }, 3000)
+  }
+
+  if (msg.includes('/login')) {
+    setTimeout(() => {
+      bot.chat(`/login ${process.env.MC_PASSWORD}`)
+
+      console.log('Login command sent')
+    }, 3000)
+  }
+})
+
+bot.on('kicked', reason => {
+  console.log('Bot kicked:', reason)
+})
+
+bot.on('error', err => {
+  console.log('Bot error:', err.message)
 })
 
 async function searchDuckDuckGo(query) {
@@ -116,11 +153,10 @@ bot.on('playerCollect', (collector, entity) => {
       const code = uuidv4().split('-')[0].toUpperCase()
 
       activeCodes[code] = {
-        owner: entity.metadata?.username || 'unknown',
         created: Date.now()
       }
 
-      bot.chat(`/msg ${username} Your hire code is ${code}`)
+      bot.chat(`Your hire code is ${code}`)
       bot.chat('payment secured')
     }, 5000)
   }
