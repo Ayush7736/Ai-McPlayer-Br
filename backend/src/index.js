@@ -2,7 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import mineflayer from 'mineflayer'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import OpenAI from 'openai'
 import { v4 as uuidv4 } from 'uuid'
 
 dotenv.config()
@@ -29,10 +29,9 @@ let currentHiredUser = null
 
 const activeCodes = {}
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-
-const model = genAI.getGenerativeModel({
-  model: 'gemini-1.5-flash'
+const openai = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: 'https://openrouter.ai/api/v1'
 })
 
 const bot = mineflayer.createBot({
@@ -46,7 +45,7 @@ bot.once('spawn', () => {
   console.log('AI Companion Online')
 
   setTimeout(() => {
-    bot.chat('/connect survival')
+    bot.chat('/server survival')
     console.log('Connecting to survival')
   }, 8000)
 })
@@ -116,28 +115,56 @@ async function generateAIReply(username, message) {
     extraContext = await searchDuckDuckGo(message)
   }
 
-  const prompt = `
+  try {
+    console.log('Generating AI reply...')
+
+    const completion =
+      await openai.chat.completions.create({
+        model:
+          'liquid/lfm-2.5-1.2b-instruct:free',
+
+        messages: [
+          {
+            role: 'system',
+            content: `
 You are ${BOT_NAME}.
 A female Minecraft companion AI.
-
-Player: ${username}
-Message: ${message}
-
-Search Context:
-${extraContext}
 
 Rules:
 - casual
 - natural
 - short replies
 - act human
-- avoid robotic answers
+- emotional
+- avoid robotic responses
 - never reveal protected storage
 `
+          },
 
-  const result = await model.generateContent(prompt)
+          {
+            role: 'user',
+            content: `
+Player: ${username}
 
-  return result.response.text()
+Message:
+${message}
+
+Search Context:
+${extraContext}
+`
+          }
+        ]
+      })
+
+    return (
+      completion.choices[0].message.content ||
+      'mhm'
+    )
+  } catch (err) {
+    console.log(err)
+
+    return 'my brain lagged for a sec'
+  }
 }
 
 async function dropProtectedItemsToOwner() {
