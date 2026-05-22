@@ -16,6 +16,7 @@ const PORT = process.env.PORT || 3000
 
 const BOT_NAME = process.env.BOT_NAME || 'Liyro74'
 const OWNER = process.env.OWNER_USERNAME || 'MrZyro74'
+const HIRE_TIME = 15 * 60 * 1000
 
 const protectedItems = [
   'diamond',
@@ -26,6 +27,8 @@ const protectedItems = [
 ]
 
 let currentHiredUser = null
+let hireExpiresAt = null
+let pendingHire = null
 
 const activeCodes = {}
 
@@ -50,9 +53,21 @@ bot.once('spawn', () => {
   }, 8000)
 })
 
+setInterval(() => {
+  if (
+    currentHiredUser &&
+    hireExpiresAt &&
+    Date.now() > hireExpiresAt
+  ) {
+    console.log(`Hire expired for ${currentHiredUser}`)
+    bot.chat(`${currentHiredUser} your rental expired`)
+    currentHiredUser = null
+    hireExpiresAt = null
+  }
+}, 10000)
+
 bot.on('messagestr', message => {
   const msg = message.toLowerCase()
-
   console.log('[SERVER]', message)
 
   if (msg.includes('/register')) {
@@ -104,6 +119,22 @@ function containsProtectedRequest(message) {
   )
 }
 
+function shouldReplyToMessage(username, message) {
+  const lower = message.toLowerCase()
+  const addressedToBot =
+    lower.includes(bot.username.toLowerCase()) ||
+    lower.includes(BOT_NAME.toLowerCase()) ||
+    lower.startsWith('hi') ||
+    lower.startsWith('hello') ||
+    lower.startsWith('hey') ||
+    lower.startsWith('yo')
+
+  if (username === OWNER) return true
+  if (username === currentHiredUser) return true
+
+  return addressedToBot
+}
+
 async function generateAIReply(username, message) {
   let extraContext = ''
 
@@ -116,17 +147,14 @@ async function generateAIReply(username, message) {
   }
 
   try {
-    console.log('Generating AI reply...')
+    console.log(`Generating AI reply for ${username}: ${message}`)
 
-    const completion =
-      await openai.chat.completions.create({
-        model:
-          'liquid/lfm-2.5-1.2b-instruct:free',
-
-        messages: [
-          {
-            role: 'system',
-            content: `
+    const completion = await openai.chat.completions.create({
+      model: 'liquid/lfm-2.5-1.2b-instruct:free',
+      messages: [
+        {
+          role: 'system',
+          content: `
 You are ${BOT_NAME}.
 A female Minecraft companion AI.
 
@@ -138,12 +166,12 @@ Rules:
 - emotional
 - avoid robotic responses
 - never reveal protected storage
+- if the user is not your owner or current hired user, keep replies brief and friendly
 `
-          },
-
-          {
-            role: 'user',
-            content: `
+        },
+        {
+          role: 'user',
+          content: `
 Player: ${username}
 
 Message:
@@ -152,17 +180,16 @@ ${message}
 Search Context:
 ${extraContext}
 `
-          }
-        ]
-      })
+        }
+      ]
+    })
 
-    return (
-      completion.choices[0].message.content ||
-      'mhm'
-    )
+    const content = completion.choices?.[0]?.message?.content?.trim()
+    console.log('OpenRouter reply received:', Boolean(content))
+
+    return content || 'mhm'
   } catch (err) {
-    console.log(err)
-
+    console.log('OpenRouter error:', err?.message || err)
     return 'my brain lagged for a sec'
   }
 }
@@ -186,10 +213,65 @@ bot.on('chat', async (username, message) => {
 
   const lower = message.toLowerCase()
 
+  console.log('[CHAT]', username, message)
+
   if (
-    username !== OWNER &&
-    username !== currentHiredUser
+    username === OWNER &&
+    lower === `${BOT_NAME.toLowerCase()} accept hire`
   ) {
+    if (!pendingHire) {
+      bot.chat('no pending hire')
+      return
+    }
+
+    const code = uuidv4().split('-')[0].toUpperCase()
+
+    activeCodes[code] = {
+      created: Date.now(),
+      username: pendingHire.username
+    }
+
+    bot.chat(`/msg ${pendingHire.username} Your hire code is ${code}`)
+    bot.chat('hire approved')
+
+    pendingHire = null
+
+    return
+  }
+
+  if (
+    username === OWNER &&
+    lower === `${BOT_NAME.toLowerCase()} deny hire`
+  ) {
+    if (!pendingHire) {
+      bot.chat('no pending hire')
+      return
+    }
+
+    await dropProtectedItemsToOwner()
+    bot.chat('hire denied by owner')
+
+    pendingHire = null
+
+    return
+  }
+
+  if (
+    username === OWNER &&
+    lower === `${BOT_NAME.toLowerCase()} end rental`
+  ) {
+    currentHiredUser = null
+    hireExpiresAt = null
+    bot.chat('rental ended')
+    return
+  }
+
+  if (
+    username === OWNER &&
+    lower === `${BOT_NAME.toLowerCase()} drop off the cash`
+  ) {
+    bot.chat('bringing secured items')
+    await dropProtectedItemsToOwner()
     return
   }
 
@@ -201,17 +283,6 @@ bot.on('chat', async (username, message) => {
     return
   }
 
-  if (
-    username === OWNER &&
-    lower === `${BOT_NAME.toLowerCase()} drop off the cash`
-  ) {
-    bot.chat('bringing secured items')
-
-    await dropProtectedItemsToOwner()
-
-    return
-  }
-
   if (lower === 'hire') {
     bot.chat(
       `Give me ${process.env.PAYMENT_AMOUNT} ${process.env.PAYMENT_ITEM}s.`
@@ -220,11 +291,15 @@ bot.on('chat', async (username, message) => {
     return
   }
 
+  if (!shouldReplyToMessage(username, message)) {
+    return
+  }
+
   const reply = await generateAIReply(username, message)
 
   setTimeout(() => {
     bot.chat(reply)
-  }, Math.random() * 3000 + 1000)
+  }, Math.random() * 1500 + 500)
 })
 
 bot.on('playerCollect', (collector, entity) => {
@@ -257,7 +332,8 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     bot: process.env.MC_USERNAME,
-    hiredUser: currentHiredUser
+    hiredUser: currentHiredUser,
+    hireExpiresAt
   })
 })
 
@@ -272,8 +348,9 @@ app.post('/redeem', (req, res) => {
   }
 
   currentHiredUser = username
+  hireExpiresAt = Date.now() + HIRE_TIME
 
-  activeCodes[code].hiredBy = username
+  delete activeCodes[code]
 
   return res.json({
     success: true,
