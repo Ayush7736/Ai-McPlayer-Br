@@ -4,8 +4,10 @@ import dotenv from 'dotenv'
 import mineflayer from 'mineflayer'
 import OpenAI from 'openai'
 import { v4 as uuidv4 } from 'uuid'
-import { pathfinder, Movements, goals } from 'mineflayer-pathfinder'
+import pkg from 'mineflayer-pathfinder'
 import minecraftData from 'minecraft-data'
+
+const { pathfinder, Movements, goals } = pkg
 
 dotenv.config()
 const app = express()
