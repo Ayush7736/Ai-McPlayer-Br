@@ -1,0 +1,1 @@
+console.log('Ai-McPlayer backend bootstrap')
